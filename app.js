@@ -221,6 +221,8 @@ function backtest(bars, cfg) {
       dayHighInFixed, dayLowInFixed, dayHighInCustom, dayLowInCustom,
       orbFixed: firstBreak(dayBars, fixedBars.length, fixedHi, fixedLo),
       orbCustom: firstBreak(dayBars, customBars.length, customHi, customLo),
+      multFixed: (fixedHi - fixedLo) > 0 ? dayRange / (fixedHi - fixedLo) : null,
+      multCustom: (customHi - customLo) > 0 ? dayRange / (customHi - customLo) : null,
     });
   }
 
@@ -264,6 +266,49 @@ function histogram(values, bins) {
     h[i]++;
   }
   return h;
+}
+
+function quantile(sorted, q) {
+  if (!sorted.length) return 0;
+  const i = (sorted.length - 1) * q;
+  const lo = Math.floor(i), hi = Math.ceil(i);
+  return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+}
+
+const MULT_THRESHOLDS = [1.0, 1.25, 1.5, 2.0, 3.0, 5.0];
+const MULT_BINS = [
+  [0, 1, "<1x"],
+  [1, 1.25, "1–1.25x"],
+  [1.25, 1.5, "1.25–1.5x"],
+  [1.5, 2, "1.5–2x"],
+  [2, 3, "2–3x"],
+  [3, 5, "3–5x"],
+  [5, Infinity, "≥5x"],
+];
+
+function multStats(values) {
+  const xs = values.filter(v => v != null && isFinite(v)).slice().sort((a, b) => a - b);
+  const n = xs.length;
+  if (!n) return { n: 0 };
+  const mean = xs.reduce((a, b) => a + b, 0) / n;
+  const stats = {
+    n,
+    mean,
+    median: quantile(xs, 0.5),
+    p25: quantile(xs, 0.25),
+    p75: quantile(xs, 0.75),
+    max: xs[n - 1],
+    min: xs[0],
+    thresholds: MULT_THRESHOLDS.map(t => ({
+      t, count: xs.filter(v => v >= t).length,
+      p: xs.filter(v => v >= t).length / n,
+    })),
+    hist: MULT_BINS.map(([lo, hi, label]) => ({
+      label,
+      count: xs.filter(v => v >= lo && v < hi).length,
+    })),
+  };
+  return stats;
 }
 
 function summarize(sessions) {
@@ -322,6 +367,8 @@ function summarize(sessions) {
     histLow:  histogram(sessions.map(s => s.tLowFrac), 10),
     corrFixedDay: pearson(fixedRanges, dayRanges),
     corrCustomDay: pearson(customRanges, dayRanges),
+    multFixed: multStats(sessions.map(s => s.multFixed)),
+    multCustom: multStats(sessions.map(s => s.multCustom)),
     firstDay: sessions[0]?.day,
     lastDay: sessions[sessions.length - 1]?.day,
   };
@@ -342,6 +389,7 @@ function renderResults(result) {
   renderHistogram(summary.histHigh, summary.histLow);
   renderMatrix("matrix-orb-fixed", summary.orbFixed, "Fixed ORB", { rowUp: "Break up first", rowDn: "Break down first" });
   renderMatrix("matrix-orb-custom", summary.orbCustom, "Custom ORB", { rowUp: "Break up first", rowDn: "Break down first" });
+  renderMultiples(summary);
   renderTable(sessions);
   renderChart(sessions);
 }
@@ -401,6 +449,88 @@ function renderMatrix(id, m, title, labels = {}) {
       ${cell(m.nn, m.n, true)}
     </div>`;
   $(id).innerHTML = html;
+}
+
+function renderMultiples(s) {
+  const f = s.multFixed, c = s.multCustom;
+  const fmtX = (v) => v.toFixed(2) + "x";
+  const html = [
+    kpi("Fixed median multiple", fmtX(f.median), `mean ${fmtX(f.mean)} (n=${f.n})`),
+    kpi("Fixed P25 / P75", `${fmtX(f.p25)} / ${fmtX(f.p75)}`, `max ${fmtX(f.max)}`),
+    kpi("Custom median multiple", fmtX(c.median), `mean ${fmtX(c.mean)} (n=${c.n})`),
+    kpi("Custom P25 / P75", `${fmtX(c.p25)} / ${fmtX(c.p75)}`, `max ${fmtX(c.max)}`),
+  ].join("");
+  $("mult-kpis").innerHTML = html;
+
+  renderThresholdTable("mult-thresh-fixed", f);
+  renderThresholdTable("mult-thresh-custom", c);
+  renderMultHistogram(f.hist, c.hist);
+}
+
+function renderThresholdTable(id, stats) {
+  const rows = stats.thresholds.map(({ t, count, p }) => `
+    <tr>
+      <td>day range ≥ ${t.toFixed(2)}x OR</td>
+      <td>${count} / ${stats.n}</td>
+      <td>${fmtPct(p)}</td>
+      <td><span class="bar" style="width:${Math.round(p * 120)}px"></span></td>
+    </tr>`).join("");
+  $(id).innerHTML = `
+    <thead><tr><th>threshold</th><th>count</th><th>share</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>`;
+}
+
+function renderMultHistogram(fixedHist, customHist) {
+  const canvas = $("mult-hist");
+  const w = canvas.clientWidth || 800;
+  const h = parseInt(canvas.getAttribute("height"), 10);
+  canvas.width = w * devicePixelRatio;
+  canvas.height = h * devicePixelRatio;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.clearRect(0, 0, w, h);
+
+  const padL = 40, padR = 12, padT = 14, padB = 36;
+  const bins = fixedHist.length;
+  const maxV = Math.max(1, ...fixedHist.map(b => b.count), ...customHist.map(b => b.count));
+  const innerW = w - padL - padR;
+  const innerH = h - padT - padB;
+  const groupW = innerW / bins;
+  const barW = groupW / 2 - 3;
+
+  ctx.strokeStyle = "#2a2f3a";
+  ctx.beginPath();
+  ctx.moveTo(padL, padT); ctx.lineTo(padL, h - padB);
+  ctx.lineTo(w - padR, h - padB); ctx.stroke();
+
+  ctx.fillStyle = "#9aa3b2";
+  ctx.font = "11px -apple-system, sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText(maxV, padL - 6, padT + 9);
+  ctx.fillText("0", padL - 6, h - padB);
+
+  ctx.textAlign = "center";
+  for (let i = 0; i < bins; i++) {
+    const x0 = padL + i * groupW + 2;
+    const hF = (fixedHist[i].count / maxV) * innerH;
+    const hC = (customHist[i].count / maxV) * innerH;
+    ctx.fillStyle = "#4f8cff";
+    ctx.fillRect(x0, h - padB - hF, barW, hF);
+    ctx.fillStyle = "#2dd4bf";
+    ctx.fillRect(x0 + barW + 3, h - padB - hC, barW, hC);
+    ctx.fillStyle = "#9aa3b2";
+    ctx.fillText(fixedHist[i].label, x0 + groupW / 2 - 2, h - padB + 14);
+  }
+
+  ctx.fillStyle = "#4f8cff";
+  ctx.fillRect(padL + 4, padT - 4, 10, 10);
+  ctx.fillStyle = "#9aa3b2";
+  ctx.textAlign = "left";
+  ctx.fillText("fixed", padL + 18, padT + 5);
+  ctx.fillStyle = "#2dd4bf";
+  ctx.fillRect(padL + 58, padT - 4, 10, 10);
+  ctx.fillStyle = "#9aa3b2";
+  ctx.fillText("custom", padL + 72, padT + 5);
 }
 
 function renderHistogram(highBins, lowBins) {
@@ -621,7 +751,8 @@ $("download-csv").addEventListener("click", () => {
                 "tHighFrac", "tLowFrac",
                 "dayHighInFixed", "dayLowInFixed",
                 "dayHighInCustom", "dayLowInCustom",
-                "orbFixed", "orbCustom"];
+                "orbFixed", "orbCustom",
+                "multFixed", "multCustom"];
   const lines = [cols.join(",")];
   for (const s of LAST_RESULT.sessions) {
     lines.push(cols.map(k => s[k]).join(","));

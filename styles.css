@@ -179,4 +179,21 @@ th { color: var(--muted); font-weight: 500; background: var(--panel2); position:
 
 .small { font-size: 12px; margin: -4px 0 8px; }
 
+.mult-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  margin: 6px 0 14px;
+}
+
+table.thresh th, table.thresh td { text-align: right; }
+table.thresh td:first-child, table.thresh th:first-child { text-align: left; }
+table.thresh .bar {
+  display: inline-block;
+  background: var(--accent);
+  height: 8px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
 footer { max-width: 1100px; margin: 0 auto; padding: 8px 24px 24px; }

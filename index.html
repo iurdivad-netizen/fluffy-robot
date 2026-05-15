@@ -93,6 +93,25 @@
       <h3>Opening&#8209;range breakout vs EOD direction &mdash; custom window</h3>
       <div id="matrix-orb-custom"></div>
 
+      <h3>Day range as a multiple of the opening range</h3>
+      <p class="muted small">
+        How many times does the opening&#8209;range size fit into the day's high&#8209;to&#8209;low?
+        A multiple of 1 means the opening range was the whole day; 3 means the day extended two further OR&#8209;lengths beyond it.
+      </p>
+      <div class="kpis" id="mult-kpis"></div>
+      <div class="mult-grid">
+        <div>
+          <h4 class="muted small">Fixed window &mdash; sessions reaching each multiple</h4>
+          <table id="mult-thresh-fixed" class="thresh"></table>
+        </div>
+        <div>
+          <h4 class="muted small">Custom window &mdash; sessions reaching each multiple</h4>
+          <table id="mult-thresh-custom" class="thresh"></table>
+        </div>
+      </div>
+      <h4 class="muted small">Distribution of day&#8209;range / opening&#8209;range multiples</h4>
+      <canvas id="mult-hist" height="180"></canvas>
+
       <h3>Per&#8209;session table <span class="muted">(first 200 rows)</span></h3>
       <div class="table-wrap"><table id="sessions-table"></table></div>
 
