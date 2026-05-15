@@ -131,6 +131,23 @@
       <h4 class="muted small">Distribution of extensions &mdash; fixed window</h4>
       <canvas id="ext-hist" height="180"></canvas>
 
+      <h3>Average day range conditional on opening&#8209;range size</h3>
+      <p class="muted small">
+        Sessions are split into quartiles by opening&#8209;range size (Q1 = narrowest 25%, Q4 = widest 25%).
+        For each bucket: average opening range, average day range, and the average multiple. Tests whether
+        a wide open is followed by a wide day &mdash; and whether narrow opens tend to expand more in OR units.
+      </p>
+      <div class="mult-grid">
+        <div>
+          <h4 class="muted small">Fixed window</h4>
+          <table id="quart-fixed" class="thresh"></table>
+        </div>
+        <div>
+          <h4 class="muted small">Custom window</h4>
+          <table id="quart-custom" class="thresh"></table>
+        </div>
+      </div>
+
       <h3>Per&#8209;session table <span class="muted">(first 200 rows)</span></h3>
       <div class="table-wrap"><table id="sessions-table"></table></div>
 
