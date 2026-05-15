@@ -322,6 +322,36 @@ function extStats(values) {
   };
 }
 
+// Bucket sessions into quartiles by an OR-size key, then report mean OR /
+// mean day range / mean & median multiple per bucket. Lets us see whether
+// wide openings systematically lead to wide days, or narrow openings
+// expand more in OR units.
+function quartileBuckets(sessions, sizeKey, multKey) {
+  const valid = sessions.filter(s => s[sizeKey] > 0).slice().sort((a, b) => a[sizeKey] - b[sizeKey]);
+  const n = valid.length;
+  if (n < 4) return { n, buckets: [] };
+  const buckets = [];
+  for (let q = 0; q < 4; q++) {
+    const lo = Math.floor(q * n / 4);
+    const hi = Math.floor((q + 1) * n / 4);
+    const slice = valid.slice(lo, hi);
+    if (!slice.length) continue;
+    const ors = slice.map(s => s[sizeKey]);
+    const dayRs = slice.map(s => s.dayRange);
+    const mults = slice.map(s => s[multKey]).filter(v => v != null && isFinite(v)).sort((a, b) => a - b);
+    buckets.push({
+      label: `Q${q + 1}`,
+      n: slice.length,
+      orMin: ors[0], orMax: ors[ors.length - 1],
+      orMean: ors.reduce((a, b) => a + b, 0) / ors.length,
+      dayMean: dayRs.reduce((a, b) => a + b, 0) / dayRs.length,
+      multMean: mults.length ? mults.reduce((a, b) => a + b, 0) / mults.length : 0,
+      multMedian: mults.length ? quantile(mults, 0.5) : 0,
+    });
+  }
+  return { n, buckets };
+}
+
 function multStats(values) {
   const xs = values.filter(v => v != null && isFinite(v)).slice().sort((a, b) => a - b);
   const n = xs.length;
@@ -409,6 +439,8 @@ function summarize(sessions) {
     extDownFixed: extStats(sessions.map(s => s.extDownFixed)),
     extUpCustom:   extStats(sessions.map(s => s.extUpCustom)),
     extDownCustom: extStats(sessions.map(s => s.extDownCustom)),
+    quartFixed:  quartileBuckets(sessions, "fixedRange",  "multFixed"),
+    quartCustom: quartileBuckets(sessions, "customRange", "multCustom"),
     firstDay: sessions[0]?.day,
     lastDay: sessions[sessions.length - 1]?.day,
   };
@@ -431,6 +463,8 @@ function renderResults(result) {
   renderMatrix("matrix-orb-custom", summary.orbCustom, "Custom ORB", { rowUp: "Break up first", rowDn: "Break down first" });
   renderMultiples(summary);
   renderExtensions(summary);
+  renderQuartile("quart-fixed",  summary.quartFixed);
+  renderQuartile("quart-custom", summary.quartCustom);
   renderTable(sessions);
   renderChart(sessions);
 }
@@ -572,6 +606,28 @@ function renderMultHistogram(fixedHist, customHist) {
   ctx.fillRect(padL + 58, padT - 4, 10, 10);
   ctx.fillStyle = "#9aa3b2";
   ctx.fillText("custom", padL + 72, padT + 5);
+}
+
+function renderQuartile(id, q) {
+  if (!q.buckets.length) {
+    $(id).innerHTML = `<tbody><tr><td class="muted">Need at least 4 sessions.</td></tr></tbody>`;
+    return;
+  }
+  const rows = q.buckets.map(b => `
+    <tr>
+      <td>${b.label} <span class="muted">(${b.n})</span></td>
+      <td>${fmtNum(b.orMin, 2)} – ${fmtNum(b.orMax, 2)}</td>
+      <td>${fmtNum(b.orMean, 2)}</td>
+      <td>${fmtNum(b.dayMean, 2)}</td>
+      <td>${b.multMean.toFixed(2)}x</td>
+      <td>${b.multMedian.toFixed(2)}x</td>
+    </tr>`).join("");
+  $(id).innerHTML = `
+    <thead><tr>
+      <th>bucket</th><th>OR size range</th><th>avg OR</th>
+      <th>avg day range</th><th>avg multiple</th><th>median multiple</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>`;
 }
 
 function renderExtensions(s) {
