@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Opening Range / EOD Direction Backtester</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Opening Range &rarr; EOD Direction Backtester</h1>
+    <p class="sub">
+      Tests the concept from
+      <a href="https://github.com/iurdivad-netizen/super-duper-octo-memory/blob/claude/sp500-daily-direction-indicator-QtemO/sp500_opening_range_eod_direction_indicator_notes.md" target="_blank" rel="noopener">these notes</a>:
+      does the direction of the first 15&#8209;minute (and an optional custom N&#8209;minute) opening window
+      agree with the end-of-day direction? Loads any intraday OHLC CSV, computes per&#8209;session signals,
+      and reports conditional hit rates plus an agreement matrix.
+    </p>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>1. Load data</h2>
+      <p class="muted">
+        CSV with intraday bars. Columns are auto&#8209;detected: a timestamp (or separate date+time)
+        and <code>open / high / low / close</code>. Works for any symbol, any intraday timeframe
+        (1m, 5m, 15m&hellip;), spanning days, weeks, or years.
+      </p>
+      <div class="row">
+        <input type="file" id="csv-file" accept=".csv,text/csv" />
+        <button id="load-sample">Load synthetic sample</button>
+        <span id="data-status" class="muted"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2. Configure session</h2>
+      <div class="grid">
+        <label>Session start (HH:MM)
+          <input type="text" id="sess-start" value="09:30" />
+        </label>
+        <label>Session end (HH:MM)
+          <input type="text" id="sess-end" value="16:00" />
+        </label>
+        <label>Fixed window (minutes)
+          <input type="number" id="win-fixed" value="15" min="1" />
+        </label>
+        <label>Custom window (minutes)
+          <input type="number" id="win-custom" value="30" min="1" />
+        </label>
+        <label>Timezone offset (minutes from UTC)
+          <input type="number" id="tz-offset" value="-300" />
+          <span class="hint">e.g. -300 = US Eastern (EST), -240 = EDT, 0 = UTC</span>
+        </label>
+        <label>Min bars per session
+          <input type="number" id="min-bars" value="5" min="1" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="run" class="primary" disabled>Run backtest</button>
+      </div>
+    </section>
+
+    <section class="card hidden" id="results">
+      <h2>3. Results</h2>
+
+      <div class="kpis" id="kpis"></div>
+
+      <h3>Agreement matrix &mdash; fixed window</h3>
+      <div id="matrix-fixed"></div>
+
+      <h3>Agreement matrix &mdash; custom window</h3>
+      <div id="matrix-custom"></div>
+
+      <h3>Cumulative agreement over time</h3>
+      <canvas id="chart" height="220"></canvas>
+
+      <h3>Per&#8209;session table <span class="muted">(first 200 rows)</span></h3>
+      <div class="table-wrap"><table id="sessions-table"></table></div>
+
+      <div class="row">
+        <button id="download-csv">Download per&#8209;session CSV</button>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p class="muted">
+      Runs entirely in your browser. No data leaves the page.
+    </p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
