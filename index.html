@@ -75,6 +75,24 @@
       <h3>Cumulative agreement over time</h3>
       <canvas id="chart" height="220"></canvas>
 
+      <h3>Day high / low containment</h3>
+      <p class="muted small">
+        How often the day's actual high or low is set <em>inside</em> the opening window, and
+        Pearson correlation between opening&#8209;range size and full&#8209;day range size.
+      </p>
+      <div class="kpis" id="hl-kpis"></div>
+
+      <h3>Where the day's extremes occur within the session</h3>
+      <p class="muted small">Histogram of the position (0 = open, 1 = close) at which each day's high and low were first reached.</p>
+      <canvas id="hist" height="180"></canvas>
+
+      <h3>Opening&#8209;range breakout vs EOD direction &mdash; fixed window</h3>
+      <p class="muted small">After the opening window closes, whichever side of the range is touched first is the &ldquo;break&rdquo;. Tests whether that first break predicts EOD direction.</p>
+      <div id="matrix-orb-fixed"></div>
+
+      <h3>Opening&#8209;range breakout vs EOD direction &mdash; custom window</h3>
+      <div id="matrix-orb-custom"></div>
+
       <h3>Per&#8209;session table <span class="muted">(first 200 rows)</span></h3>
       <div class="table-wrap"><table id="sessions-table"></table></div>
 
