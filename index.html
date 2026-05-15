@@ -112,6 +112,25 @@
       <h4 class="muted small">Distribution of day&#8209;range / opening&#8209;range multiples</h4>
       <canvas id="mult-hist" height="180"></canvas>
 
+      <h3>Extension beyond the opening range, in OR sizes</h3>
+      <p class="muted small">
+        Upside extension = (day high &minus; OR high) / OR size. Downside extension = (OR low &minus; day low) / OR size.
+        Both are &ge; 0 by construction; together with 1 they sum to the day&#8209;range / OR multiple.
+      </p>
+      <div class="kpis" id="ext-kpis"></div>
+      <div class="mult-grid">
+        <div>
+          <h4 class="muted small">Fixed window &mdash; share of sessions extending at least</h4>
+          <table id="ext-thresh-fixed" class="thresh ext"></table>
+        </div>
+        <div>
+          <h4 class="muted small">Custom window &mdash; share of sessions extending at least</h4>
+          <table id="ext-thresh-custom" class="thresh ext"></table>
+        </div>
+      </div>
+      <h4 class="muted small">Distribution of extensions &mdash; fixed window</h4>
+      <canvas id="ext-hist" height="180"></canvas>
+
       <h3>Per&#8209;session table <span class="muted">(first 200 rows)</span></h3>
       <div class="table-wrap"><table id="sessions-table"></table></div>
 
