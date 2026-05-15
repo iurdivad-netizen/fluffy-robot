@@ -194,19 +194,76 @@ function backtest(bars, cfg) {
     const sigCustom = customClose === sessionOpen ? 0 : (customClose > sessionOpen ? 1 : -1);
     const sigEOD = eodClose === sessionOpen ? 0 : (eodClose > sessionOpen ? 1 : -1);
 
+    // Index of the first bar that prints the day high / low.
+    let hiIdx = 0, loIdx = 0;
+    for (let i = 0; i < dayBars.length; i++) if (dayBars[i].h === dayHi) { hiIdx = i; break; }
+    for (let i = 0; i < dayBars.length; i++) if (dayBars[i].l === dayLo) { loIdx = i; break; }
+    const denom = Math.max(1, dayBars.length - 1);
+    const tHighFrac = hiIdx / denom;
+    const tLowFrac = loIdx / denom;
+
+    const dayHighInFixed = hiIdx < fixedBars.length;
+    const dayLowInFixed  = loIdx < fixedBars.length;
+    const dayHighInCustom = hiIdx < customBars.length;
+    const dayLowInCustom  = loIdx < customBars.length;
+
     sessions.push({
       day,
       sessionOpen, eodClose,
       fixedClose, customClose,
+      fixedHi, fixedLo, customHi, customLo,
       fixedRange: fixedHi - fixedLo,
       customRange: customHi - customLo,
       dayRange,
       sigFixed, sigCustom, sigEOD,
       retEOD: (eodClose - sessionOpen) / sessionOpen,
+      tHighFrac, tLowFrac,
+      dayHighInFixed, dayLowInFixed, dayHighInCustom, dayLowInCustom,
+      orbFixed: firstBreak(dayBars, fixedBars.length, fixedHi, fixedLo),
+      orbCustom: firstBreak(dayBars, customBars.length, customHi, customLo),
     });
   }
 
   return { sessions, summary: summarize(sessions) };
+}
+
+// Scan bars after the opening window to see which side of the OR is touched first.
+// Returns 1 (high broken first), -1 (low broken first), 0 (neither).
+function firstBreak(dayBars, fromIdx, orHi, orLo) {
+  for (let i = fromIdx; i < dayBars.length; i++) {
+    const b = dayBars[i];
+    const up = b.h > orHi, dn = b.l < orLo;
+    if (up && dn) {
+      // Intra-bar ambiguity: pick the side closer to the bar open.
+      return Math.abs(b.o - orHi) < Math.abs(b.o - orLo) ? 1 : -1;
+    }
+    if (up) return 1;
+    if (dn) return -1;
+  }
+  return 0;
+}
+
+function pearson(xs, ys) {
+  const n = xs.length;
+  if (n < 2) return 0;
+  let mx = 0, my = 0;
+  for (let i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; }
+  mx /= n; my /= n;
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) {
+    const a = xs[i] - mx, b = ys[i] - my;
+    num += a * b; dx += a * a; dy += b * b;
+  }
+  return dx && dy ? num / Math.sqrt(dx * dy) : 0;
+}
+
+function histogram(values, bins) {
+  const h = new Array(bins).fill(0);
+  for (const v of values) {
+    const i = Math.min(bins - 1, Math.max(0, Math.floor(v * bins)));
+    h[i]++;
+  }
+  return h;
 }
 
 function summarize(sessions) {
@@ -236,6 +293,11 @@ function summarize(sessions) {
     };
   }
 
+  const pFlag = (key) => total ? sessions.filter(s => s[key]).length / total : 0;
+  const fixedRanges = sessions.map(s => s.fixedRange);
+  const customRanges = sessions.map(s => s.customRange);
+  const dayRanges = sessions.map(s => s.dayRange);
+
   const meanRangeRatio = (key) => {
     const xs = sessions.filter(s => s.dayRange > 0).map(s => s[key] / s.dayRange);
     return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
@@ -246,8 +308,20 @@ function summarize(sessions) {
     decisive: sessions.filter(decisive).length,
     fixed: matrix("sigFixed"),
     custom: matrix("sigCustom"),
+    orbFixed: matrix("orbFixed"),
+    orbCustom: matrix("orbCustom"),
     fixedRangeRatio: meanRangeRatio("fixedRange"),
     customRangeRatio: meanRangeRatio("customRange"),
+    pHighInFixed: pFlag("dayHighInFixed"),
+    pLowInFixed:  pFlag("dayLowInFixed"),
+    pHighInCustom: pFlag("dayHighInCustom"),
+    pLowInCustom:  pFlag("dayLowInCustom"),
+    pEitherInFixed: total ? sessions.filter(s => s.dayHighInFixed || s.dayLowInFixed).length / total : 0,
+    pEitherInCustom: total ? sessions.filter(s => s.dayHighInCustom || s.dayLowInCustom).length / total : 0,
+    histHigh: histogram(sessions.map(s => s.tHighFrac), 10),
+    histLow:  histogram(sessions.map(s => s.tLowFrac), 10),
+    corrFixedDay: pearson(fixedRanges, dayRanges),
+    corrCustomDay: pearson(customRanges, dayRanges),
     firstDay: sessions[0]?.day,
     lastDay: sessions[sessions.length - 1]?.day,
   };
@@ -264,8 +338,26 @@ function renderResults(result) {
   renderKPIs(summary);
   renderMatrix("matrix-fixed", summary.fixed, "Fixed window");
   renderMatrix("matrix-custom", summary.custom, "Custom window");
+  renderHLKPIs(summary);
+  renderHistogram(summary.histHigh, summary.histLow);
+  renderMatrix("matrix-orb-fixed", summary.orbFixed, "Fixed ORB", { rowUp: "Break up first", rowDn: "Break down first" });
+  renderMatrix("matrix-orb-custom", summary.orbCustom, "Custom ORB", { rowUp: "Break up first", rowDn: "Break down first" });
   renderTable(sessions);
   renderChart(sessions);
+}
+
+function renderHLKPIs(s) {
+  const html = [
+    kpi("Day high in fixed window", fmtPct(s.pHighInFixed), "P(day high set in first N min)"),
+    kpi("Day low in fixed window", fmtPct(s.pLowInFixed), "P(day low set in first N min)"),
+    kpi("Either extreme in fixed", fmtPct(s.pEitherInFixed), "P(high OR low in window)"),
+    kpi("Day high in custom window", fmtPct(s.pHighInCustom), ""),
+    kpi("Day low in custom window", fmtPct(s.pLowInCustom), ""),
+    kpi("Either extreme in custom", fmtPct(s.pEitherInCustom), ""),
+    kpi("corr(fixed range, day range)", s.corrFixedDay.toFixed(3), "Pearson"),
+    kpi("corr(custom range, day range)", s.corrCustomDay.toFixed(3), "Pearson"),
+  ].join("");
+  $("hl-kpis").innerHTML = html;
 }
 
 function renderKPIs(s) {
@@ -288,24 +380,82 @@ function kpi(label, value, sub) {
     <div class="sub">${sub || ""}</div></div>`;
 }
 
-function renderMatrix(id, m, title) {
+function renderMatrix(id, m, title, labels = {}) {
+  const rowUp = labels.rowUp || "Window up";
+  const rowDn = labels.rowDn || "Window down";
   const cell = (n, total, agree) => {
     const p = total ? n / total : 0;
     return `<div class="${agree ? "agree" : "disagree"}">${n}<br><span class="muted">${fmtPct(p)}</span></div>`;
   };
+  const agree = m.n ? (m.bb + m.nn) / m.n : 0;
   const html = `
     <div class="matrix">
-      <div class="corner">${title}</div>
+      <div class="corner">${title}<br><span class="muted">agree ${fmtPct(agree)} (n=${m.n})</span></div>
       <div class="h">EOD up</div>
       <div class="h">EOD down</div>
-      <div class="h">Window up</div>
+      <div class="h">${rowUp}</div>
       ${cell(m.bb, m.n, true)}
       ${cell(m.bn, m.n, false)}
-      <div class="h">Window down</div>
+      <div class="h">${rowDn}</div>
       ${cell(m.nb, m.n, false)}
       ${cell(m.nn, m.n, true)}
     </div>`;
   $(id).innerHTML = html;
+}
+
+function renderHistogram(highBins, lowBins) {
+  const canvas = $("hist");
+  const w = canvas.clientWidth || 800;
+  const h = parseInt(canvas.getAttribute("height"), 10);
+  canvas.width = w * devicePixelRatio;
+  canvas.height = h * devicePixelRatio;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.clearRect(0, 0, w, h);
+
+  const padL = 40, padR = 12, padT = 12, padB = 28;
+  const bins = highBins.length;
+  const maxV = Math.max(1, ...highBins, ...lowBins);
+  const innerW = w - padL - padR;
+  const innerH = h - padT - padB;
+  const groupW = innerW / bins;
+  const barW = groupW / 2 - 2;
+
+  ctx.strokeStyle = "#2a2f3a";
+  ctx.beginPath();
+  ctx.moveTo(padL, padT); ctx.lineTo(padL, h - padB);
+  ctx.lineTo(w - padR, h - padB); ctx.stroke();
+
+  ctx.fillStyle = "#9aa3b2";
+  ctx.font = "11px -apple-system, sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText(maxV, padL - 6, padT + 9);
+  ctx.fillText("0", padL - 6, h - padB);
+  ctx.textAlign = "left";
+  ctx.fillText("open", padL, h - 8);
+  ctx.textAlign = "right";
+  ctx.fillText("close", w - padR, h - 8);
+
+  for (let i = 0; i < bins; i++) {
+    const x0 = padL + i * groupW + 2;
+    const hHi = (highBins[i] / maxV) * innerH;
+    const hLo = (lowBins[i] / maxV) * innerH;
+    ctx.fillStyle = "#22c55e";
+    ctx.fillRect(x0, h - padB - hHi, barW, hHi);
+    ctx.fillStyle = "#ef4444";
+    ctx.fillRect(x0 + barW + 2, h - padB - hLo, barW, hLo);
+  }
+
+  // Legend
+  ctx.fillStyle = "#22c55e";
+  ctx.fillRect(padL + 4, padT + 2, 10, 10);
+  ctx.fillStyle = "#9aa3b2";
+  ctx.textAlign = "left";
+  ctx.fillText("day high", padL + 18, padT + 11);
+  ctx.fillStyle = "#ef4444";
+  ctx.fillRect(padL + 78, padT + 2, 10, 10);
+  ctx.fillStyle = "#9aa3b2";
+  ctx.fillText("day low", padL + 92, padT + 11);
 }
 
 function renderTable(sessions) {
@@ -466,7 +616,12 @@ $("download-csv").addEventListener("click", () => {
   if (!LAST_RESULT) return;
   const cols = ["day", "sessionOpen", "fixedClose", "customClose", "eodClose",
                 "sigFixed", "sigCustom", "sigEOD", "retEOD",
-                "fixedRange", "customRange", "dayRange"];
+                "fixedHi", "fixedLo", "customHi", "customLo",
+                "fixedRange", "customRange", "dayRange",
+                "tHighFrac", "tLowFrac",
+                "dayHighInFixed", "dayLowInFixed",
+                "dayHighInCustom", "dayLowInCustom",
+                "orbFixed", "orbCustom"];
   const lines = [cols.join(",")];
   for (const s of LAST_RESULT.sessions) {
     lines.push(cols.map(k => s[k]).join(","));
