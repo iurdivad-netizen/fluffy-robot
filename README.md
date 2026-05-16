@@ -34,6 +34,13 @@ date,time,open,high,low,close,volume
 ...
 ```
 
+An optional `vix` column (per bar) feeds the **VIX expected-move band**
+section, which reproduces the "Expected SPX Movement by timeframe"
+indicator: it draws `VIX / √basis` bands around each period's close and
+counts how often the next period closes inside them — the options
+"trade counter" for short-premium containment. Without a `vix` column it
+uses the constant **VIX level** from the config.
+
 Timestamps may be ISO 8601, `YYYY-MM-DD HH:MM:SS`, or a Unix epoch
 (seconds or ms). Set the **Timezone offset** field to match how your
 timestamps are encoded so the session window lines up correctly

@@ -55,6 +55,18 @@
         <label>Min bars per session
           <input type="number" id="min-bars" value="5" min="1" />
         </label>
+        <label>VIX level (used when CSV has no <code>vix</code> column)
+          <input type="number" id="vix-const" value="20" min="0" step="0.1" />
+          <span class="hint">Add a <code>vix</code> column to the CSV for a per&#8209;period value.</span>
+        </label>
+        <label>Annualization basis
+          <select id="ann-basis">
+            <option value="252">Daily (&radic;252)</option>
+            <option value="52">Weekly (&radic;52)</option>
+            <option value="12">Monthly (&radic;12)</option>
+          </select>
+          <span class="hint">VIX is divided by this square root to get the expected per&#8209;period move.</span>
+        </label>
       </div>
       <div class="row">
         <button id="run" class="primary" disabled>Run backtest</button>
@@ -147,6 +159,19 @@
           <table id="quart-custom" class="thresh"></table>
         </div>
       </div>
+
+      <h3>VIX expected&#8209;move band &mdash; containment counter</h3>
+      <p class="muted small">
+        Reproduces the &ldquo;Expected SPX Movement by timeframe&rdquo; indicator. For each period the
+        expected move is <code>VIX &divide; &radic;basis</code> (%). Bands are drawn around the
+        <em>previous</em> period&rsquo;s close, and the next period is flagged a <strong>breakout</strong>
+        if it closes outside them. The trade counter below is the options view: how often a short
+        premium position (price stays inside the band) would have won.
+      </p>
+      <div class="kpis" id="vix-kpis"></div>
+      <table id="vix-thresh" class="thresh"></table>
+      <h4 class="muted small">Recent periods <span class="muted">(last 60)</span></h4>
+      <div class="table-wrap"><table id="vix-table"></table></div>
 
       <h3>Per&#8209;session table <span class="muted">(first 200 rows)</span></h3>
       <div class="table-wrap"><table id="sessions-table"></table></div>

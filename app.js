@@ -84,8 +84,9 @@ function csvToBars(text) {
   const hIdx = findCol(header, ["high", "h"]);
   const lIdx = findCol(header, ["low", "l"]);
   const cIdx = findCol(header, ["close", "c"]);
+  const vIdx = findCol(header, ["vix", "vix_close", "vixclose"]);
 
-  let pickT, pickO, pickH, pickL, pickC;
+  let pickT, pickO, pickH, pickL, pickC, pickV = () => NaN;
 
   if (header) {
     if (oIdx === -1 || hIdx === -1 || lIdx === -1 || cIdx === -1)
@@ -94,6 +95,7 @@ function csvToBars(text) {
     pickH = (r) => parseFloat(r[hIdx]);
     pickL = (r) => parseFloat(r[lIdx]);
     pickC = (r) => parseFloat(r[cIdx]);
+    if (vIdx !== -1) pickV = (r) => parseFloat(r[vIdx]);
     if (dateIdx !== -1 && timeIdx !== -1 && tsIdx === -1) {
       pickT = (r) => parseDateTime(r[dateIdx], r[timeIdx]);
     } else if (tsIdx !== -1) {
@@ -121,7 +123,8 @@ function csvToBars(text) {
   for (const r of rows) {
     const t = pickT(r), o = pickO(r), h = pickH(r), l = pickL(r), c = pickC(r);
     if (!isNaN(t) && !isNaN(o) && !isNaN(h) && !isNaN(l) && !isNaN(c)) {
-      bars.push({ t, o, h, l, c });
+      const v = pickV(r);
+      bars.push(isNaN(v) ? { t, o, h, l, c } : { t, o, h, l, c, v });
     }
   }
   bars.sort((a, b) => a.t - b.t);
@@ -173,6 +176,12 @@ function backtest(bars, cfg) {
     const sessionOpen = dayBars[0].o;
     const eodClose = dayBars[dayBars.length - 1].c;
 
+    // VIX for the period: last bar carrying a vix value, else the configured constant.
+    let sessionVix = cfg.vixConst;
+    for (let i = dayBars.length - 1; i >= 0; i--) {
+      if (dayBars[i].v != null && isFinite(dayBars[i].v)) { sessionVix = dayBars[i].v; break; }
+    }
+
     // Highest/lowest within fixed and custom windows.
     const within = (b, mins) => b.minOfDay - dayBars[0].minOfDay < mins;
     const fixedBars = dayBars.filter(b => within(b, winFixed));
@@ -209,7 +218,7 @@ function backtest(bars, cfg) {
 
     sessions.push({
       day,
-      sessionOpen, eodClose,
+      sessionOpen, eodClose, sessionVix,
       fixedClose, customClose,
       fixedHi, fixedLo, customHi, customLo,
       fixedRange: fixedHi - fixedLo,
@@ -230,7 +239,45 @@ function backtest(bars, cfg) {
     });
   }
 
-  return { sessions, summary: summarize(sessions) };
+  return {
+    sessions,
+    summary: summarize(sessions),
+    vixBand: vixBandStats(sessions, cfg.annBasis),
+  };
+}
+
+// Reproduces the "Expected SPX Movement by timeframe" indicator as a counter.
+// For each period the expected move is VIX / sqrt(annBasis) (in %). The band is
+// drawn around the PREVIOUS period's close (matching the indicator's [1] offset),
+// and the current period is a "breakout" if it closes outside that band.
+// This is the options view: a short-premium trade wins when price stays inside.
+function vixBandStats(sessions, annBasis) {
+  const scale = Math.sqrt(annBasis);
+  let inside = 0, outside = 0;
+  const rows = [];
+  for (let i = 1; i < sessions.length; i++) {
+    const prev = sessions[i - 1], cur = sessions[i];
+    const vix = prev.sessionVix;
+    if (vix == null || !isFinite(vix) || vix < 0 || !(prev.eodClose > 0)) continue;
+    const movePct = vix / scale;
+    const upper = prev.eodClose * (1 + movePct / 100);
+    const lower = prev.eodClose * (1 - movePct / 100);
+    const isIn = cur.eodClose <= upper && cur.eodClose >= lower;
+    if (isIn) inside++; else outside++;
+    cur.emVix = vix;
+    cur.emMovePct = movePct;
+    cur.emLower = lower;
+    cur.emUpper = upper;
+    cur.emInside = isIn;
+    rows.push({ day: cur.day, vix, movePct, lower, upper, close: cur.eodClose, inside: isIn });
+  }
+  const evaluated = inside + outside;
+  return {
+    annBasis, scale, evaluated, inside, outside,
+    pInside: evaluated ? inside / evaluated : 0,
+    pOutside: evaluated ? outside / evaluated : 0,
+    rows,
+  };
 }
 
 // Scan bars after the opening window to see which side of the OR is touched first.
@@ -465,8 +512,56 @@ function renderResults(result) {
   renderExtensions(summary);
   renderQuartile("quart-fixed",  summary.quartFixed);
   renderQuartile("quart-custom", summary.quartCustom);
+  renderVixBand(result.vixBand);
   renderTable(sessions);
   renderChart(sessions);
+}
+
+function renderVixBand(vb) {
+  const html = [
+    kpi("Periods evaluated", vb.evaluated, `annualization &radic;${vb.annBasis}`),
+    kpi("Stayed inside band", vb.inside, fmtPct(vb.pInside) + " of periods"),
+    kpi("Breakouts", vb.outside, fmtPct(vb.pOutside) + " of periods"),
+    kpi("Short-premium win rate", fmtPct(vb.pInside), "price contained → trade wins"),
+  ].join("");
+  $("vix-kpis").innerHTML = html;
+
+  const wins = vb.inside, n = vb.evaluated;
+  const expWin = n ? wins / n : 0;
+  $("vix-thresh").innerHTML = `
+    <thead><tr><th>outcome</th><th>count</th><th>share</th><th></th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Inside band (win)</td>
+        <td>${wins} / ${n}</td>
+        <td>${fmtPct(expWin)}</td>
+        <td><span class="bar" style="width:${Math.round(expWin * 120)}px"></span></td>
+      </tr>
+      <tr>
+        <td>Breakout (loss)</td>
+        <td>${vb.outside} / ${n}</td>
+        <td>${fmtPct(vb.pOutside)}</td>
+        <td><span class="bar" style="width:${Math.round(vb.pOutside * 120)}px"></span></td>
+      </tr>
+    </tbody>`;
+
+  if (!vb.rows.length) {
+    $("vix-table").innerHTML = `<tbody><tr><td class="muted">No periods evaluated. Need at least 2 sessions and a VIX value.</td></tr></tbody>`;
+    return;
+  }
+  const headers = ["period", "VIX", "exp move %", "band low", "band high", "close", "result"];
+  const rows = vb.rows.slice(-60).reverse().map(r => `
+    <tr>
+      <td>${r.day}</td>
+      <td>${fmtNum(r.vix, 2)}</td>
+      <td>${fmtNum(r.movePct, 2)}%</td>
+      <td>${fmtNum(r.lower)}</td>
+      <td>${fmtNum(r.upper)}</td>
+      <td>${fmtNum(r.close)}</td>
+      <td class="${r.inside ? "up" : "down"}">${r.inside ? "inside" : "breakout"}</td>
+    </tr>`).join("");
+  $("vix-table").innerHTML =
+    `<thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody>`;
 }
 
 function renderHLKPIs(s) {
@@ -876,6 +971,8 @@ function readConfig() {
     winCustom: parseInt($("win-custom").value, 10),
     tzOffset: parseInt($("tz-offset").value, 10),
     minBars: parseInt($("min-bars").value, 10),
+    vixConst: parseFloat($("vix-const").value),
+    annBasis: parseInt($("ann-basis").value, 10),
   };
 }
 
@@ -934,7 +1031,8 @@ $("download-csv").addEventListener("click", () => {
                 "dayHighInCustom", "dayLowInCustom",
                 "orbFixed", "orbCustom",
                 "multFixed", "multCustom",
-                "extUpFixed", "extDownFixed", "extUpCustom", "extDownCustom"];
+                "extUpFixed", "extDownFixed", "extUpCustom", "extDownCustom",
+                "sessionVix", "emVix", "emMovePct", "emLower", "emUpper", "emInside"];
   const lines = [cols.join(",")];
   for (const s of LAST_RESULT.sessions) {
     lines.push(cols.map(k => s[k]).join(","));
@@ -954,6 +1052,7 @@ function generateSample() {
   // Random walk with mild opening-range -> EOD bias to make the indicator look "interesting".
   const bars = [];
   let price = 4500;
+  let vix = 18;
   let day = new Date(Date.UTC(2024, 0, 2, 14, 30)); // 09:30 ET in UTC (winter)
   let rng = mulberry32(42);
   for (let d = 0; d < 120; d++) {
@@ -963,6 +1062,8 @@ function generateSample() {
     }
     const dayBias = (rng() - 0.5) * 0.6;          // overall direction for the day
     const openBias = dayBias + (rng() - 0.5) * 0.4; // opening tilt, correlated with day
+    // Slow mean-reverting VIX-like series, bounded to a realistic range.
+    vix = Math.max(10, Math.min(45, vix + (rng() - 0.5) * 3 + (18 - vix) * 0.05));
     for (let i = 0; i < 26; i++) {
       const t = new Date(day.getTime() + i * 15 * 60 * 1000);
       const driftMin = i < 2 ? openBias * 0.6 : dayBias * 0.15;
@@ -971,7 +1072,7 @@ function generateSample() {
       const c = o * (1 + ret);
       const hi = Math.max(o, c) * (1 + rng() * 0.0008);
       const lo = Math.min(o, c) * (1 - rng() * 0.0008);
-      bars.push({ t: t.getTime(), o, h: hi, l: lo, c });
+      bars.push({ t: t.getTime(), o, h: hi, l: lo, c, v: vix });
       price = c;
     }
     day = new Date(day.getTime() + 24 * 3600 * 1000);
